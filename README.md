@@ -1,4 +1,5 @@
 # 常见的未授权漏洞检测
+
 项目包含1 、FTP 未授权访问（21）
 2 、LDAP 未授权访问（389）
 3 、Rsync 未授权访问（873）
@@ -38,4 +39,4 @@
 37 、Kong未授权访问漏洞(CVE-2020-11710)
 38 、ThinkAdminV6未授权访问漏洞
 # 代码规范，可以自己添加其他漏洞检测
-# 基于DjangoRestFramework的WEB版已完成，后续发布
+# 基于DjangoRestFramework和VUE的WEB版已完成，后续发布
