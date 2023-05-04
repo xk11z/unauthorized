@@ -1,6 +1,6 @@
 # 常见的未授权漏洞检测
 --命令行版已放出支持多线程，批量扫描，指定服务扫描，命令行版地址https://github.com/xk11z/unauthorized_com
---GUI版后续更新
+--GUI版unauthorizedV2已更新，可批量ip检测导出结果
 
 项目包含1 、FTP 未授权访问（21）  
 2 、LDAP 未授权访问（389）  
@@ -46,6 +46,8 @@ pip install -r requestments.txt
 python3 main.py
 # Screenshot
 ![存在漏洞](https://user-images.githubusercontent.com/126586204/235194877-b84ffd82-469b-4016-b924-672bc671d652.PNG)
+# UNauthorizedV2
+![v2](https://user-images.githubusercontent.com/126586204/236142851-429e5ba1-1056-417e-b86e-f90487470c07.PNG)
 
 # 免责声明
 本工具仅面向合法授权的企业安全建设行为，如您需要测试本工具的可用性，请自行搭建靶机环境。 在使用本工具进行检测时，您应确保该行为符合当地的法律法规，并且已经取得了足够的授权。请勿对非授权目标进行扫描。 如您在使用本工具的过程中存在任何非法行为，您需自行承担相应后果，我们将不承担任何法律及连带责任。
