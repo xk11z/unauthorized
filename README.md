@@ -1,7 +1,7 @@
 # 常见的未授权漏洞检测
 --命令行版已放出支持多线程，批量扫描，指定服务扫描，命令行版地址https://github.com/xk11z/unauthorized_com
 --GUI版unauthorizedV2已更新，可批量ip检测导出结果
-注：ai生成的部分可能检测不出请自行修改
+
 
 项目包含1 、FTP 未授权访问（21）  
 2 、LDAP 未授权访问（389）  
