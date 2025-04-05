@@ -4,6 +4,7 @@ import socket
 import sys
 import memcache
 import pymongo
+import ldap3
 import redis
 import requests
 from PyQt5 import QtWidgets
@@ -17,7 +18,7 @@ class SecurityChecker(QWidget):
 
     def initUI(self):
         self.setWindowTitle(
-            '常见端口未授权漏洞检测系统_V2                                                                                                      designd by xkllz date:2023-05-04')
+            '常见端口未授权漏洞检测系统_V2                                  designed by xkllz date:2023-05-04')
         self.text = QtWidgets.QTextEdit(self)
         self.text.setPlaceholderText("请导入IP地址文件")
         self.text.move(20, 50)
@@ -222,7 +223,8 @@ class SecurityChecker(QWidget):
         if file_name:
             with open(file_name, "w") as f:
                 f.write(self.result_label.toPlainText())
-    # 检查 FTP 是否存在未授权访问漏洞
+        # 检查 FTP 是否存在未授权访问漏洞
+
     def check_ftp(self, ip):
         try:
             ftp = ftplib.FTP(ip)
@@ -231,98 +233,104 @@ class SecurityChecker(QWidget):
             ftp.quit()
             result = f"{ip}[+]存在FTP未授权访问漏洞"
         except:
+            # 尝试常见弱密码
+            weak_passwords = [('admin', 'admin'), ('anonymous', 'anonymous')]
+            for user, pwd in weak_passwords:
+                try:
+                    ftp = ftplib.FTP(ip)
+                    ftp.login(user, pwd)
+                    ftp.cwd('/')
+                    ftp.quit()
+                    result = f"{ip}[+]存在FTP未授权访问漏洞（弱密码）"
+                    return result
+                except:
+                    continue
             result = f"{ip} ftp无法连接"
-
         return result
 
     def check_jboss(self, ip):
-
         # 检查 JBoss 是否存在未授权访问漏洞
-        jboss_url = f'http://{ip}:8080/jmx-console/'
-        try:
-            jboss_response = requests.get(jboss_url,timeout=5)
-            if 'jboss' in jboss_response.headers.get('Server', '') and 'Welcome to JBossAS' in jboss_response.text:
-                result = f"{ip}[+]存在jboss未授权访问漏洞"
-            else:
-                result = f"{ip}不存在jboss未授权访问漏洞"
-        except:
-            result = f"{ip}jboss无法连接"
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:8080/jmx-console/',
+            f'http://{ip}:8080/console/',
+            f'http://{ip}:8080/invoker/JMXInvokerServlet'
+        ]
+        for url in endpoints:
+            try:
+                jboss_response = requests.get(url, timeout=5)
+                if 'jboss' in jboss_response.headers.get('Server', '') and 'Welcome to JBossAS' in jboss_response.text:
+                    result = f"{ip}[+]存在jboss未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在jboss未授权访问漏洞"
         return result
 
-        # 检查 Solr 是否存在未授权访问漏洞
-
+    # 检查 Solr 是否存在未授权访问漏洞
     def check_solr(self, ip):
-
-        solr_url = f'http://{ip}:8983/solr/'
-        try:
-            response = requests.get(solr_url, timeout=5)
-            if 'Apache Solr' in response.text:
-                result = f"{ip}[+]存在solr未授权访问漏洞"
-            else:
-                result = f"{ip}不存在solr未授权访问漏洞"
-
-        except:
-            result = f"{ip}solr无法连接"
-            # 显示结果
+        endpoints = [
+            f'http://{ip}:8983/solr/',
+            f'http://{ip}:8983/solr/admin/',
+            f'http://{ip}:8983/solr/select'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'Apache Solr' in response.text:
+                    result = f"{ip}[+]存在solr未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在solr未授权访问漏洞"
         return result
-
-        # 检查 WebLogic 是否存在未授权访问漏洞
-
+    # 检查 WebLogic 是否存在未授权访问漏洞
     def check_weblogic(self, ip):
-
-        weblogic_url = f'http://{ip}:7001/console/login/LoginForm.jsp'
-
-        try:
-            response = requests.get(weblogic_url, timeout=5)
-            if 'Oracle WebLogic Server' in response.text:
-                result = f"{ip}[+]存在weblogic未授权访问漏洞"
-            else:
-                result = f"{ip}不存在weblogic未授权访问漏洞"
-        except:
-            result = f"{ip}weblogic无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:7001/console/login/LoginForm.jsp',
+            f'http://{ip}:7001/wls-wsat/CoordinatorPortType',
+            f'http://{ip}:7001/console/css/console.css'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'Oracle WebLogic Server' in response.text:
+                    result = f"{ip}[+]存在weblogic未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在weblogic未授权访问漏洞"
         return result
-
-
-
     def check_ldap(self, ip):
 
-        # 检查 LDAP 是否存在未授权访问漏洞
-        ldap_url = ip + ':389'
         try:
-            ldap_response = requests.get(ldap_url)
-            if 'OpenLDAP' in ldap_response.headers.get('Server', '') and '80090308' in ldap_response.text:
+            server = ldap3.Server(f'ldap://{ip}:389')
+            conn = ldap3.Connection(server)
+            if conn.bind():
                 result = f"{ip}[+]存在ldap未授权访问漏洞"
             else:
                 result = f"{ip}不存在ldap未授权访问漏洞"
+            conn.unbind()
         except:
             result = f"{ip}ldap无法连接"
-
+        return result
+    def check_redis(self, ip):
+        # 检查 Redis 是否存在未授权访问漏洞
+        redis_port = 6379
+        try:
+            # 尝试连接 Redis 服务
+            r = redis.Redis(host=ip, port=redis_port, socket_timeout=3)
+            # 尝试获取 Redis 信息
+            info = r.info()
+            result = f"{ip}[+]存在 redis 未授权访问漏洞"
+        except redis.exceptions.AuthenticationError:
+            result = f"{ip}不存在 redis 未授权访问漏洞"
+        except redis.exceptions.ConnectionError:
+            result = f"{ip}redis 无法连接"
+        except Exception:
+            result = f"{ip}检测时出现未知错误"
         # 显示结果
         return result
-
-    def check_redis(self, ip):
-          # 检查 Redis 是否存在未授权访问漏洞
-          redis_port = 6379
-          try:
-              # 尝试连接 Redis 服务
-              r = redis.Redis(host=ip, port=redis_port, socket_timeout=3)
-              # 尝试获取 Redis 信息
-              info = r.info()
-              result = f"{ip}[+]存在 redis 未授权访问漏洞"
-          except redis.exceptions.AuthenticationError:
-              result = f"{ip}不存在 redis 未授权访问漏洞"
-          except redis.exceptions.ConnectionError:
-              result = f"{ip}redis 无法连接"
-          except Exception:
-              result = f"{ip}检测时出现未知错误"
-          # 显示结果
-          return result
-
     def check_nfs(self, ip):
-
         # 检查 NFS 是否存在未授权访问漏洞
         try:
             nfs_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -337,26 +345,23 @@ class SecurityChecker(QWidget):
                 result = f"{ip}不存在nfs未授权访问漏洞"
         except:
             result = f"nfs无法连接到该 {ip}"
-
-        # 显示结果
         return result
-
     def check_zookeeper(self, ip):
-
-        # 检查 Zookeeper 是否存在未授权访问漏洞
-        zookeeper_url = ip + ':2181'
+        import socket
         try:
-            zookeeper_response = requests.get(zookeeper_url, timeout=5)
-            if 'Zookeeper' in zookeeper_response.headers.get('Server',
-                                                             '') and zookeeper_response.status_code == 200:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            sock.connect((ip, 2181))
+            sock.send(b'stat')
+            data = sock.recv(1024)
+            if data:
                 result = f"{ip}[+]存在zookeeper未授权访问漏洞"
             else:
                 result = f"{ip}不存在zookeeper未授权访问漏洞"
+            sock.close()
         except:
-            result = "无法连接到 Zookeeper 服务"
-        # 显示结果
+            result = f"{ip}无法连接到 Zookeeper 服务"
         return result
-
     def check_vnc(self, ip):
         try:
             import pyvnc  # 使用pyvnc库进行VNC连接尝试，需先安装该库
@@ -369,20 +374,21 @@ class SecurityChecker(QWidget):
         return result
     # 检查 Elasticsearch 是否存在未授权访问漏洞
     def check_elasticsearch(self, ip):
-
-        url = f'http://{ip}:8000/_cat'
-        try:
-            response = requests.get(url, timeout=5)
-            if '/_cat/master' in response.text:
-                result = f"{ip}[+]存在elasticsearch未授权访问漏洞"
-            else:
-                result = f"{ip}不存在elasticsearch未授权访问漏洞"
-        except:
-            result = f"{ip}es无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:9200/_cat',
+            f'http://{ip}:9200/_nodes',
+            f'http://{ip}:9200/_cluster/health'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    result = f"{ip}[+]存在elasticsearch未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在elasticsearch未授权访问漏洞"
         return result
-
     def check_jenkins(self, ip):
         jenkins_url = f'http://{ip}:8080'
         try:
@@ -400,72 +406,70 @@ class SecurityChecker(QWidget):
         except:
             result = f"{ip}jenkins无法连接"
         return result
-
     def check_kibana(self, ip):
         kibana_url = f'http://{ip}:5601'
-        try:
-            response = requests.get(kibana_url, timeout=5)
-            if 'kbn-name="kibana"' in response.text:
-                # 增加判断是否能访问一些Kibana的默认功能页面
-                dashboard_url = kibana_url + "/app/dashboards"
-                dashboard_response = requests.get(dashboard_url, timeout=5)
-                if dashboard_response.status_code == 200:
+        endpoints = [
+            kibana_url,
+            kibana_url + "/app/dashboards",
+            kibana_url + "/api/saved_objects/_find?type=dashboard"
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
                     result = f"{ip}[+]存在kibana未授权访问漏洞"
-                else:
-                    result = f"{ip}不存在kibana未授权访问漏洞"
-            else:
-                result = f"{ip}不存在kibana未授权访问漏洞"
-        except:
-            result = f"{ip}kibana无法连接"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在kibana未授权访问漏洞"
         return result
-
     # 检查 IPC 是否存在未授权访问漏洞
     def check_ipc(self, ip):
-
-        ipc_url = f'http://{ip}:445'
         try:
-            response = requests.get(ipc_url, timeout=5)
-            if 'IPC Service' in response.text:
+            import smbclient
+            try:
+                smbclient.register_session(ip, username='', password='')
                 result = f"{ip}[+]存在ipc未授权访问漏洞"
-            else:
+            except smbclient.AccessDenied:
                 result = f"{ip}不存在ipc未授权访问漏洞"
-        except:
-            result = f"{ip}ipc无法连接"
-
-        # 显示结果
+            except:
+                result = f"{ip}ipc无法连接"
+        except ImportError:
+            result = f"{ip}缺少 smbclient 库，无法检测 IPC"
         return result
-
     # 检查 Druid 是否存在未授权访问漏洞
     def check_druid(self, ip):
-
-        druid_url = f'http://{ip}:8888/druid/index.html'
-        try:
-            response = requests.get(druid_url, timeout=5)
-            if 'Druid Console' in response.text:
-                result = f"{ip}[+]存在druid未授权访问漏洞"
-            else:
-                result = f"{ip}不存在druid未授权访问漏洞"
-        except:
-            result = f"{ip}druid无法连接"
-
-            # 显示结果
+        endpoints = [
+            f'http://{ip}:8888/druid/index.html',
+            f'http://{ip}:8888/druid/console.html',
+            f'http://{ip}:8888/druid/sql.html'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'Druid' in response.text:
+                    result = f"{ip}[+]存在druid未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在druid未授权访问漏洞"
         return result
-
     def check_swaggerui(self, ip):
-
-        # 检查 SwaggerUI 是否存在未授权访问漏洞
-        swaggerui_url = ip + '/swagger-ui.html'
-        try:
-            swaggerui_response = requests.get(swaggerui_url, timeout=5)
-            if 'Swagger' in swaggerui_response.text:
-                result = f"{ip}[+]存在swaggerui未授权访问漏洞"
-            else:
-                result = f"{ip}不存在swaggerui未授权访问漏洞"
-        except:
-            result = "无法连接到 SwaggerUI 应用程序"
-        # 显示结果
+        endpoints = [
+            ip + '/swagger-ui.html',
+            ip + '/v2/api-docs',
+            ip + '/swagger-resources'
+        ]
+        for url in endpoints:
+            try:
+                swaggerui_response = requests.get(url, timeout=5)
+                if 'Swagger' in swaggerui_response.text:
+                    result = f"{ip}[+]存在swaggerui未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在swaggerui未授权访问漏洞"
         return result
-
     def check_docker(self, ip):
         docker_url = 'http://' + ip + ':2375/version'
         try:
@@ -482,26 +486,25 @@ class SecurityChecker(QWidget):
             else:
                 result = f"{ip}不存在docker未授权访问漏洞"
         except:
-            result = "无法连接到 Docker 守护进程"
+            result = f"{ip}无法连接到 Docker 守护进程"
         return result
-
     # 检查 RabbitMQ 是否存在未授权访问漏洞
     def check_rabbitmq(self, ip):
-
-        rabbitmq_url = f'http://{ip}:15672/'
-
-        try:
-            response = requests.get(rabbitmq_url, timeout=5)
-            if 'RabbitMQ Management' in response.text and 'overview-module' in response.text:
-                result = f"{ip}[+]存在rabbitmq未授权访问漏洞"
-            else:
-                result = f"{ip}不存在rabbitmq未授权访问漏洞"
-        except:
-            result = f"{ip}rabbitmq无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:15672/',
+            f'http://{ip}:15672/api/nodes',
+            f'http://{ip}:15672/api/queues'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'RabbitMQ Management' in response.text and 'overview-module' in response.text:
+                    result = f"{ip}[+]存在rabbitmq未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在rabbitmq未授权访问漏洞"
         return result
-
     def check_memcached(self, ip):
         try:
             memcached_client = memcache.Client([ip], timeout=5)
@@ -515,10 +518,8 @@ class SecurityChecker(QWidget):
         except:
             result = f"{ip}memcached无法连接"
         return result
-
     # 检查 Dubbo 是否存在未授权访问漏洞
     def check_dubbo(self, ip):
-
         url = f'http://{ip}:8080/'
         try:
             response = requests.get(url, timeout=5)
@@ -528,26 +529,24 @@ class SecurityChecker(QWidget):
                 result = f"{ip}不存在dubbo未授权访问漏洞"
         except:
             result = f"{ip}dubbo无法连接"
-
-        # 显示结果
         return result
-
     # 检查宝塔phpmyadmin是否存在未授权访问漏洞
     def check_bt_phpmyadmin(self, ip):
-
-        phpmyadmin_url = f'http://{ip}/phpmyadmin/'
-        try:
-            response = requests.get(phpmyadmin_url, timeout=5)
-            if 'phpMyAdmin' in response.text:
-                result = f"{ip}[+]存在bt_phpmyadmin未授权访问漏洞"
-            else:
-                result = f"{ip}不存在bt_phpmyadmin未授权访问漏洞"
-        except:
-            result = f"{ip}btphpmydamin无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}/phpmyadmin/',
+            f'http://{ip}/phpmyadmin/index.php',
+            f'http://{ip}/phpmyadmin/config.inc.php'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'phpMyAdmin' in response.text:
+                    result = f"{ip}[+]存在bt_phpmyadmin未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在bt_phpmyadmin未授权访问漏洞"
         return result
-
     def check_rsync(self, ip):
         try:
             import subprocess
@@ -584,97 +583,95 @@ class SecurityChecker(QWidget):
         except:
             result = f"{ip}kubernetes无法连接"
         return result
-
     # 检查 CouchDB 是否存在未授权访问漏洞
     def check_couchdb(self, ip):
-
-        couchdb_url = f'http://{ip}:5984/_utils/'
-
-        try:
-            response = requests.get(couchdb_url, timeout=5)
-            if 'Welcome to CouchDB' in response.text:
-                result = f"{ip}[+]存在couchdb未授权访问漏洞"
-            else:
-                result = f"{ip}不存在couchdb未授权访问漏洞"
-        except:
-            result = f"{ip}couchdb无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:5984/_utils/',
+            f'http://{ip}:5984/_all_dbs',
+            f'http://{ip}:5984/_stats'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'Welcome to CouchDB' in response.text:
+                    result = f"{ip}[+]存在couchdb未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在couchdb未授权访问漏洞"
         return result
-
     # 检查 Spring Boot Actuator 是否存在未授权访问漏洞
     def check_spring_boot_actuator(self, ip):
-
-        actuator_url = f'http://{ip}:8080/actuator/'
-
-        try:
-            response = requests.get(actuator_url, timeout=5)
-            if 'Hystrix' in response.text and 'health" : {' in response.text:
-                result = f"{ip}[+]存在spring_boot_actuator未授权访问漏洞"
-            else:
-                result = f"{ip}不存在spring_boot_actuator未授权访问漏洞"
-        except:
-            result = f"{ip}actuator无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:8080/actuator/',
+            f'http://{ip}:8080/actuator/health',
+            f'http://{ip}:8080/actuator/info',
+            f'http://{ip}:8080/actuator/env'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    result = f"{ip}[+]存在spring_boot_actuator未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在spring_boot_actuator未授权访问漏洞"
         return result
-
     # 检查 uWSGI 是否存在未授权访问漏洞
     def check_uwsgi(self, ip):
-
-        uwsgi_url = f'http://{ip}:1717/'
-
-        try:
-            response = requests.get(uwsgi_url, timeout=5)
-            if 'uWSGI Status' in response.text:
-                result = f"{ip}[+]存在uwsgi未授权访问漏洞"
-            else:
-                result = f"{ip}不存在uwsgi未授权访问漏洞"
-        except:
-            result = f"{ip}uwsgi无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:1717/',
+            f'http://{ip}:1717/admin',
+            f'http://{ip}:1717/stats'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'uWSGI' in response.text:
+                    result = f"{ip}[+]存在uwsgi未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在uwsgi未授权访问漏洞"
         return result
-
     # 检查 ThinkAdmin V6 是否存在未授权访问漏洞
     def check_thinkadmin_v6(self, ip):
-
-        thinkadmin_url = f'http://{ip}/index/login.html'
-
-        try:
-            response = requests.get(thinkadmin_url, timeout=5)
-            if 'ThinkAdmin' in response.text and 'logincheck' in response.text:
-                result = f"{ip}[+]存在thinkadmin_v6未授权访问漏洞"
-            else:
-                result = f"{ip}不存在thinkadmin_v6未授权访问漏洞"
-        except:
-            result = f"{ip}thinkadminv6无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}/index/login.html',
+            f'http://{ip}/admin',
+            f'http://{ip}/api'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'ThinkAdmin' in response.text:
+                    result = f"{ip}[+]存在thinkadmin_v6未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在thinkadmin_v6未授权访问漏洞"
         return result
-
     # 检查 PHP-FPM Fastcgi 是否存在未授权访问漏洞
     def check_php_fpm_fastcgi(self, ip):
-
-        php_fpm_url = f'http://{ip}/php-fpm_status'
-
-        try:
-            response = requests.get(php_fpm_url, timeout=5)
-            if 'pool:' in response.text and 'processes' in response.text:
-                result = f"{ip}[+]存在php_fpm_fastcgi未授权访问漏洞"
-            else:
-                result = f"{ip}不存在php_fpm_fastcgi未授权访问漏洞"
-        except:
-            result = f"{ip}phpfpm无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}/php-fpm_status',
+            f'http://{ip}/status.php',
+            f'http://{ip}/ping.php'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'PHP' in response.text and ('pool' in response.text or 'processes' in response.text):
+                    result = f"{ip}[+]存在php_fpm_fastcgi未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在php_fpm_fastcgi未授权访问漏洞"
         return result
-
     # 检查 MongoDB 是否存在未授权访问漏洞
     def check_mongodb(self, ip):
-
         mongodb_url = f'mongodb://{ip}:27017/'
-
         try:
             client = pymongo.MongoClient(mongodb_url, serverSelectionTimeoutMS=5000)
             dbs = client.list_database_names()
@@ -684,183 +681,167 @@ class SecurityChecker(QWidget):
                 result = f"{ip}不存在mongodb未授权访问漏洞"
         except:
             result = f"{ip}mongodb无法连接"
-
-        # 显示结果
         return result
-
     # 检查 Jupyter Notebook 是否存在未授权访问漏洞
     def check_jupyter_notebook(self, ip):
-
-        notebook_url = f'http://{ip}:8888/'
-
-        try:
-            response = requests.get(notebook_url, timeout=5)
-            if 'Jupyter Notebook' in response.text:
-                result = f"{ip}[+]存在jupyter_notebook未授权访问漏洞"
-            else:
-                result = f"{ip}不存在jupyter_notebook未授权访问漏洞"
-        except:
-            result = f"{ip}jupyter无法连接"
-
-        # 显示结果
+        endpoints = [
+            f'http://{ip}:8888/',
+            f'http://{ip}:8888/api',
+            f'http://{ip}:8888/user'
+        ]
+        for url in endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if 'Jupyter' in response.text:
+                    result = f"{ip}[+]存在jupyter_notebook未授权访问漏洞"
+                    return result
+            except:
+                continue
+        result = f"{ip}不存在jupyter_notebook未授权访问漏洞"
         return result
 
-    # 检查 Apache Spark 是否存在未授权访问漏洞
     def check_apache_spark(self, ip):
-
         spark_url = f'http://{ip}:8080/'
-
         try:
             response = requests.get(spark_url, timeout=5)
+            response.raise_for_status()
             if 'Spark Master at' in response.text and 'Workers' in response.text:
                 result = f"{ip}[+]存在apache_spark未授权访问漏洞"
             else:
                 result = f"{ip}不存在apache_spark未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}spark无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}spark响应内容解析错误"
         return result
 
-    # 检查 Docker Registry 是否存在未授权访问漏洞
     def check_docker_registry(self, ip):
-
         registry_url = f'http://{ip}/v2/_catalog'
-
         try:
             response = requests.get(registry_url, timeout=5)
-            if 'repositories' in response.json():
+            response.raise_for_status()
+            json_data = response.json()
+            if 'repositories' in json_data:
                 result = f"{ip}[+]存在docker_registry未授权访问漏洞"
             else:
                 result = f"{ip}不存在docker_registry未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}registry无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}registry响应内容不是有效的JSON格式"
         return result
 
-    # 检查 Hadoop YARN 是否存在未授权访问漏洞
     def check_hadoop_yarn(self, ip):
-
         yarn_url = f'http://{ip}:8088/ws/v1/cluster/info'
-
         try:
             response = requests.get(yarn_url, timeout=5)
-            if 'resourceManagerVersion' in response.json()['clusterInfo']:
+            response.raise_for_status()
+            json_data = response.json()
+            if 'resourceManagerVersion' in json_data.get('clusterInfo', {}):
                 result = f"{ip}[+]存在hadoop_yarn未授权访问漏洞"
             else:
                 result = f"{ip}不存在hadoop_yarn未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}yarn无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}yarn响应内容不是有效的JSON格式"
         return result
 
-    # 检查 Kong 是否存在未授权访问漏洞
     def check_kong(self, ip):
-
         kong_url = f'http://{ip}:8001/'
-
         try:
             response = requests.get(kong_url, timeout=5)
+            response.raise_for_status()
             if 'Welcome to Kong' in response.text:
                 result = f"{ip}[+]存在kong未授权访问漏洞"
             else:
                 result = f"{ip}不存在kong未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}kong无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}kong响应内容解析错误"
         return result
 
-    # 检查 WordPress 是否存在未授权访问漏洞
     def check_wordpress(self, ip):
-
         wordpress_url = f'http://{ip}/wp-login.php'
-
         try:
             response = requests.get(wordpress_url, timeout=5)
+            response.raise_for_status()
             if 'WordPress' in response.text:
                 result = f"{ip}[+]存在wordpress未授权访问漏洞"
             else:
                 result = f"{ip}不存在wordpress未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}wordpress无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}wordpress响应内容解析错误"
         return result
 
-    # 检查 Zabbix 是否存在未授权访问漏洞
     def check_zabbix(self, ip):
-
         zabbix_url = f'http://{ip}/zabbix/jsrpc.php'
-
+        headers = {
+            'Content-Type': 'application/json-rpc',
+            'User-Agent': 'Mozilla/5.0'
+        }
+        data = '{"jsonrpc":"2.0","method":"user.login","params":{"user":"","password":""},"id":0}'
         try:
-            headers = {
-                'Content-Type': 'application/json-rpc',
-                'User-Agent': 'Mozilla/5.0'
-            }
-            data = '{"jsonrpc":"2.0","method":"user.login","params":{"user":"","password":""},"id":0}'
             response = requests.post(zabbix_url, headers=headers, data=data, timeout=5)
-            if 'result' in response.json():
+            response.raise_for_status()
+            json_data = response.json()
+            if 'result' in json_data:
                 result = f"{ip}[+]存在zabbix未授权访问漏洞"
             else:
                 result = f"{ip}不存在zabbix未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}zabbix无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}zabbix响应内容不是有效的JSON格式"
         return result
 
-    # 检查 Active MQ 是否存在未授权访问漏洞
     def check_activemq(self, ip):
-
         activemq_url = f'http://{ip}:8161/admin/'
-
         try:
             response = requests.get(activemq_url, timeout=5)
+            response.raise_for_status()
             if 'Apache ActiveMQ' in response.text:
                 result = f"{ip}[+]存在activemq未授权访问漏洞"
             else:
                 result = f"{ip}不存在activemq未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}activemq无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}activemq响应内容解析错误"
         return result
 
-    # 检查 Harbor 是否存在未授权访问漏洞
     def check_harbor(self, ip):
-
         harbor_url = f'http://{ip}/api/v2.0/statistics'
-
         try:
             response = requests.get(harbor_url, timeout=5)
-            if 'total_projects' in response.json():
+            response.raise_for_status()
+            json_data = response.json()
+            if 'total_projects' in json_data:
                 result = f"{ip}[+]存在harbor未授权访问漏洞"
             else:
                 result = f"{ip}不存在harbor未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}harbor无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}harbor响应内容不是有效的JSON格式"
         return result
 
-    # 检查 Atlassian Crowd 是否存在未授权访问漏洞
     def check_atlassian_crowd(self, ip):
-
         crowd_url = f'http://{ip}:8095/crowd/'
-
         try:
             response = requests.get(crowd_url, timeout=5)
+            response.raise_for_status()
             if 'Atlassian Crowd' in response.text:
                 result = f"{ip}[+]存在atlassian_crowd未授权访问漏洞"
             else:
                 result = f"{ip}不存在atlassian_crowd未授权访问漏洞"
-        except:
+        except requests.RequestException:
             result = f"{ip}atlassian无法连接"
-
-        # 显示结果
+        except ValueError:
+            result = f"{ip}atlassian响应内容解析错误"
         return result
 if __name__ == '__main__':
     app = QApplication(sys.argv)
