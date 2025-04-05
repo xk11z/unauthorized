@@ -1,8 +1,10 @@
 import ftplib
+import json
 import socket
 import sys
 import memcache
 import pymongo
+import redis
 import requests
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QApplication, QWidget,  QPushButton, QFileDialog
@@ -302,20 +304,22 @@ class SecurityChecker(QWidget):
         return result
 
     def check_redis(self, ip):
-
-        # 检查 Redis 是否存在未授权访问漏洞
-        redis_url = ip + ':6379/info'
-        try:
-            redis_response = requests.get(redis_url, allow_redirects=False)
-            if redis_response.status_code == 200 and 'redis_version' in redis_response.text:
-                result = f"{ip}[+]存在redis未授权访问漏洞"
-            else:
-                result = f"{ip}不存在redis未授权访问漏洞"
-        except:
-            result = f"{ip}redis无法连接"
-
-        # 显示结果
-        return result
+          # 检查 Redis 是否存在未授权访问漏洞
+          redis_port = 6379
+          try:
+              # 尝试连接 Redis 服务
+              r = redis.Redis(host=ip, port=redis_port, socket_timeout=3)
+              # 尝试获取 Redis 信息
+              info = r.info()
+              result = f"{ip}[+]存在 redis 未授权访问漏洞"
+          except redis.exceptions.AuthenticationError:
+              result = f"{ip}不存在 redis 未授权访问漏洞"
+          except redis.exceptions.ConnectionError:
+              result = f"{ip}redis 无法连接"
+          except Exception:
+              result = f"{ip}检测时出现未知错误"
+          # 显示结果
+          return result
 
     def check_nfs(self, ip):
 
@@ -353,22 +357,16 @@ class SecurityChecker(QWidget):
         # 显示结果
         return result
 
-    # 检查 VNC 是否存在未授权访问漏洞
     def check_vnc(self, ip):
-
-        vnc_url = f'vnc://{ip}'
         try:
-            tigerVNC_response = requests.get(vnc_url, timeout=5)
-            if "RFB 003.008\n" in tigerVNC_response.content.decode('utf-8'):
-                result = f"{ip}[+]存在vnc未授权访问漏洞"
-            else:
-                result = f"{ip}不存在vnc未授权访问漏洞"
+            import pyvnc  # 使用pyvnc库进行VNC连接尝试，需先安装该库
+            client = pyvnc.VNC(ip, 5900)  # 假设默认端口5900，可根据实际调整
+            client.connect()
+            result = f"{ip}[+]存在vnc未授权访问漏洞"
+            client.disconnect()
         except:
             result = f"{ip}vnc无法连接"
-
-        # 显示结果
         return result
-
     # 检查 Elasticsearch 是否存在未授权访问漏洞
     def check_elasticsearch(self, ip):
 
@@ -385,36 +383,40 @@ class SecurityChecker(QWidget):
         # 显示结果
         return result
 
-    # 检查 Jenkins 是否存在未授权访问漏洞
     def check_jenkins(self, ip):
-
         jenkins_url = f'http://{ip}:8080'
         try:
             response = requests.get(jenkins_url, timeout=5)
             if 'jenkins' in response.headers.get('X-Jenkins', '') and 'Dashboard [Jenkins]' in response.text:
-                result = f"{ip}[+]存在jenkins未授权访问漏洞"
+                # 增加判断是否能访问关键接口，如获取任务列表接口
+                jobs_url = jenkins_url + "/api/json?tree=jobs[name]"
+                jobs_response = requests.get(jobs_url, timeout=5)
+                if jobs_response.status_code == 200:
+                    result = f"{ip}[+]存在jenkins未授权访问漏洞"
+                else:
+                    result = f"{ip}不存在jenkins未授权访问漏洞"
             else:
                 result = f"{ip}不存在jenkins未授权访问漏洞"
         except:
             result = f"{ip}jenkins无法连接"
-
-        # 显示结果
         return result
 
-    # 检查 Kibana 是否存在未授权访问漏洞
     def check_kibana(self, ip):
-
         kibana_url = f'http://{ip}:5601'
         try:
             response = requests.get(kibana_url, timeout=5)
             if 'kbn-name="kibana"' in response.text:
-                result = f"{ip}[+]存在kibana未授权访问漏洞"
+                # 增加判断是否能访问一些Kibana的默认功能页面
+                dashboard_url = kibana_url + "/app/dashboards"
+                dashboard_response = requests.get(dashboard_url, timeout=5)
+                if dashboard_response.status_code == 200:
+                    result = f"{ip}[+]存在kibana未授权访问漏洞"
+                else:
+                    result = f"{ip}不存在kibana未授权访问漏洞"
             else:
                 result = f"{ip}不存在kibana未授权访问漏洞"
         except:
             result = f"{ip}kibana无法连接"
-
-        # 显示结果
         return result
 
     # 检查 IPC 是否存在未授权访问漏洞
@@ -465,18 +467,22 @@ class SecurityChecker(QWidget):
         return result
 
     def check_docker(self, ip):
-
-        # 检查 Docker 是否存在未授权访问漏洞
         docker_url = 'http://' + ip + ':2375/version'
         try:
-            docker_response = requests.get(docker_url, timeout=5)
-            if docker_response.status_code == 200 and 'ApiVersion' in docker_response.json():
-                result = f"{ip}[+]存在docker未授权访问漏洞"
+            response = requests.get(docker_url, timeout=5)
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    if 'ApiVersion' in data:
+                        result = f"{ip}[+]存在docker未授权访问漏洞"
+                    else:
+                        result = f"{ip}不存在docker未授权访问漏洞"
+                except json.JSONDecodeError:
+                    result = f"{ip}不存在docker未授权访问漏洞"
             else:
                 result = f"{ip}不存在docker未授权访问漏洞"
         except:
             result = "无法连接到 Docker 守护进程"
-        # 显示结果
         return result
 
     # 检查 RabbitMQ 是否存在未授权访问漏洞
@@ -496,20 +502,18 @@ class SecurityChecker(QWidget):
         # 显示结果
         return result
 
-    # 检查 Memcached 是否存在未授权访问漏洞
     def check_memcached(self, ip):
-
         try:
             memcached_client = memcache.Client([ip], timeout=5)
+            # 尝试获取多个不同类型的统计信息来增加判断准确性
             stats = memcached_client.get_stats()
-            if len(stats) > 0:
+            settings = memcached_client.get_settings()
+            if len(stats) > 0 or len(settings) > 0:
                 result = f"{ip}[+]存在memcached未授权访问漏洞"
             else:
                 result = f"{ip}不存在memcached未授权访问漏洞"
         except:
             result = f"{ip}memcached无法连接"
-
-        # 显示结果
         return result
 
     # 检查 Dubbo 是否存在未授权访问漏洞
@@ -544,37 +548,41 @@ class SecurityChecker(QWidget):
         # 显示结果
         return result
 
-    # 检查 Rsync 是否存在未授权访问漏洞
     def check_rsync(self, ip):
-
-        rsync_url = f'rsync://{ip}'
         try:
-            response = requests.get(rsync_url, timeout=5)
-            if 'rsync' in response.headers.get('Server', '') and 'rsyncd.conf' in response.text:
+            import subprocess
+            # 尝试使用rsync命令连接并获取信息
+            command = f"rsync --list-only rsync://{ip}/"
+            process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output, error = process.communicate()
+            if process.returncode == 0:
                 result = f"{ip}[+]存在rsync未授权访问漏洞"
             else:
                 result = f"{ip}不存在rsync未授权访问漏洞"
         except:
             result = f"{ip}rsync无法连接"
-
-        # 显示结果
         return result
-
     # 检查 Kubernetes Api Server 是否存在未授权访问漏洞
     def check_kubernetes_api_server(self, ip):
-
         api_server_url = f'https://{ip}:6443/api/'
-
         try:
-            response = requests.get(api_server_url, verify=False, timeout=5)
-            if 'Unauthorized' in response.text:
+            response = requests.get(api_server_url, timeout=5, verify=False)
+            if response.status_code == 401:  # 更准确的判断未授权状态码
                 result = f"{ip}[+]存在kubernetes_api_server未授权访问漏洞"
+            elif response.status_code == 200:
+                # 200可能表示已授权访问，也可能表示开放了未授权可访问的接口，进一步判断
+                try:
+                    data = response.json()
+                    if "kind" in data:
+                        result = f"{ip}[+]存在kubernetes_api_server未授权访问漏洞"
+                    else:
+                        result = f"{ip}不存在kubernetes_api_server未授权访问漏洞"
+                except json.JSONDecodeError:
+                    result = f"{ip}不存在kubernetes_api_server未授权访问漏洞"
             else:
                 result = f"{ip}不存在kubernetes_api_server未授权访问漏洞"
         except:
             result = f"{ip}kubernetes无法连接"
-
-        # 显示结果
         return result
 
     # 检查 CouchDB 是否存在未授权访问漏洞
