@@ -3,7 +3,9 @@ charset-normalizer==3.4.1
 dnspython==2.7.0
 hashring==1.5.1
 idna==3.10
+ldap3==2.9.1
 memcache==0.12.0
+pyasn1==0.6.1
 pymongo==4.11.3
 PyQt5==5.15.11
 PyQt5-Qt5==5.15.2
